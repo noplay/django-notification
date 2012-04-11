@@ -4,7 +4,6 @@ from django.core.urlresolvers import reverse
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.template.defaultfilters import linebreaks, escape, striptags
-from django.utils.timezone import utc
 from django.utils.translation import ugettext_lazy as _
 
 from django.contrib.auth.models import User
@@ -67,7 +66,11 @@ class NoticeUserFeed(BaseNoticeFeed):
         # must be a feed_updated field as per the Atom specifications, however
         # there is no real data to go by, and an arbitrary date can be static.
         if qs.count() == 0:
-            return datetime.datetime(year=2008, month=7, day=1, tzinfo=utc)
+            try:
+                from django.utils.timezone import utc
+                return datetime.datetime(year=2008, month=7, day=1, tzinfo=utc)
+            except ImportError:
+                return datetime.datetime(year=2008, month=7, day=1)
         return qs.latest("added").added
     
     def feed_links(self, user):

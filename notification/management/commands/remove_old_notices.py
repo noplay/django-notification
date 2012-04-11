@@ -5,6 +5,7 @@ from optparse import make_option
 
 from django.core.management.base import BaseCommand
 from django.conf import settings
+from django.utils.timezone import make_aware, utc
 
 from notification.models import Notice
 
@@ -24,7 +25,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         dryrun = options['dryrun']
         limit = time() - settings.NOTICES_MAX_AGE
-        limit = datetime.fromtimestamp(limit)
+        limit = make_aware(datetime.fromtimestamp(limit), utc)
         notices = Notice.objects.filter(added__lte=limit)
         if dryrun:
             count = notices.count()

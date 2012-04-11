@@ -3,6 +3,12 @@ try:
 except ImportError:
     import pickle
 
+try:
+    from django.utils.timezone import now
+except ImportError:
+    from datetime import datetime
+    now = datetime.now
+
 from django.db import models
 from django.db.models.query import QuerySet
 from django.conf import settings
@@ -11,7 +17,6 @@ from django.core.mail import send_mail
 from django.core.urlresolvers import reverse
 from django.template import Context
 from django.template.loader import render_to_string
-from django.utils.timezone import now
 from django.utils.translation import ugettext_lazy as _
 from django.utils.translation import ugettext, get_language, activate
 

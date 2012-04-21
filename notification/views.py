@@ -1,10 +1,9 @@
 from django.core.urlresolvers import reverse
 from django.shortcuts import render_to_response, get_object_or_404
-from django.http import HttpResponseRedirect, Http404
+from django.http import HttpResponseRedirect, Http404, HttpResponse
 from django.template import RequestContext
 
 from django.contrib.auth.decorators import login_required
-from django.contrib.syndication.views import feed
 
 from notification.models import *
 from notification.decorators import basic_auth_required, simple_basic_auth_callback
@@ -14,13 +13,12 @@ from notification.feeds import NoticeUserFeed
 @basic_auth_required(realm="Notices Feed", callback_func=simple_basic_auth_callback)
 def feed_for_user(request):
     """
-    An atom feed for all unarchived :model:`notification.Notice`s for a user.
+    An atom feed for all :model:`notification.Notice`s for a user.
     """
-    url = "feed/%s" % request.user.username
-    return feed(request, url, {
-        "feed": NoticeUserFeed,
-    })
-
+    feedgen = NoticeUserFeed().get_feed(request.user.username)
+    response = HttpResponse(mimetype=feedgen.mime_type)
+    feedgen.write(response, 'utf-8')
+    return response
 
 @login_required
 def notices(request):
@@ -32,16 +30,25 @@ def notices(request):
     Context:
     
         notices
-            A list of :model:`notification.Notice` objects that are not archived
-            and to be displayed on the site.
+            A list of :model:`notification.Notice` to be displayed on the site.
+        
+        only_show
+            A list of filters corresponding to :model:`notification.NoticeType`
+            labels, if present in ``request.GET``
     """
     notices = Notice.objects.notices_for(request.user, on_site=True)
     
+    if 'only_show' in request.GET:
+        only_show = request.GET['only_show'].split(',')
+        notices = notices.filter(notice_type__in=only_show)            
+    else:
+        only_show = None
+    
     return render_to_response("notification/notices.html", {
         "notices": notices,
+        "only_show" : only_show,
     }, context_instance=RequestContext(request))
-
-
+    
 @login_required
 def notice_settings(request):
     """
@@ -188,7 +195,5 @@ def mark_all_seen(request):
     ``HttpResponseRedirect`` when complete. 
     """
     
-    for notice in Notice.objects.notices_for(request.user, unseen=True):
-        notice.unseen = False
-        notice.save()
+    Notice.objects.notices_for(request.user, unseen=True).update(unseen=False)
     return HttpResponseRedirect(reverse("notification_notices"))

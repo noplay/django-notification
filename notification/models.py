@@ -1,9 +1,13 @@
-import datetime
-
 try:
     import cPickle as pickle
 except ImportError:
     import pickle
+
+try:
+    from django.utils.timezone import now
+except ImportError:
+    from datetime import datetime
+    now = datetime.now
 
 from django.db import models
 from django.db.models.query import QuerySet
@@ -22,6 +26,11 @@ from django.contrib.auth.models import AnonymousUser
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes import generic
 
+if 'mailer' in settings.INSTALLED_APPS:
+    from mailer import send_html_mail
+else:
+    send_html_mail = False
+
 QUEUE_ALL = getattr(settings, "NOTIFICATION_QUEUE_ALL", False)
 
 
@@ -31,8 +40,8 @@ class LanguageStoreNotAvailable(Exception):
 class NoticeType(models.Model):
     
     label = models.CharField(_("label"), max_length=40)
-    display = models.CharField(_("display"), max_length=50)
-    description = models.CharField(_("description"), max_length=100)
+    display = models.CharField(_("display"), max_length=100)
+    description = models.CharField(_("description"), max_length=255)
     
     # by default only on for media with sensitivity less than or equal to this number
     default = models.IntegerField(_("default"))
@@ -88,30 +97,36 @@ def should_send(user, notice_type, medium):
 
 class NoticeManager(models.Manager):
     
-    def notices_for(self, user, archived=False, unseen=None, on_site=None, sent=False):
+    def notices_for(self, user, archived=None, unseen=None, on_site=None, sent=False):
         """
         returns Notice objects for the given user.
         
-        If archived=False, it only include notices not archived.
-        If archived=True, it returns all notices for that user.
+        If sent=True, include only sent notices.
+        If sent=False, include only received notices.
         
-        If unseen=None, it includes all notices.
-        If unseen=True, return only unseen notices.
-        If unseen=False, return only seen notices.
+        If archived=None, it doesn't filter on 'archived' field.
+        If archived=True, include only archived notices.
+        If archived=False, include only not archived notices.
+
+        If unseen=None, it doesn't filter on 'unseen' field.
+        If unseen=True, include only unseen notices.
+        If unseen=False, include only seen notices.
         """
+        lookup_kwargs = {}
         if sent:
-            lookup_kwargs = {"sender": user}
+            lookup_kwarg["sender"] = user
         else:
-            lookup_kwargs = {"recipient": user}
-        qs = self.filter(**lookup_kwargs)
-        if not archived:
-            self.filter(archived=archived)
+            lookup_kwargs["recipient"] = user
+
+        if archived is not None:
+            lookup_kwargs["archived"] = archived
         if unseen is not None:
-            qs = qs.filter(unseen=unseen)
+            lookup_kwargs["unseen"] = unseen
         if on_site is not None:
-            qs = qs.filter(on_site=on_site)
-        return qs
-    
+            lookup_kwargs["on_site"] = on_site
+
+        return self.filter(**lookup_kwargs)
+
     def unseen_count_for(self, recipient, **kwargs):
         """
         returns the number of unseen notices for the given user but does not
@@ -140,7 +155,7 @@ class Notice(models.Model):
     sender = models.ForeignKey(User, null=True, related_name="sent_notices", verbose_name=_("sender"))
     message = models.TextField(_("message"))
     notice_type = models.ForeignKey(NoticeType, verbose_name=_("notice type"))
-    added = models.DateTimeField(_("added"), default=datetime.datetime.now)
+    added = models.DateTimeField(_("added"), default=now)
     unseen = models.BooleanField(_("unseen"), default=True)
     archived = models.BooleanField(_("archived"), default=False)
     on_site = models.BooleanField(_("on site"))
@@ -320,11 +335,19 @@ def send_now(users, label, extra_context=None, on_site=True, sender=None):
             "message": messages["full.txt"],
         }, context)
         
+        body_html = render_to_string("notification/email_body.html", {
+            "message": messages["full.html"],
+        }, context)
+        
         notice = Notice.objects.create(recipient=user, message=messages["notice.html"],
             notice_type=notice_type, on_site=on_site, sender=sender)
         if should_send(user, notice_type, "1") and user.email and user.is_active: # Email
             recipients.append(user.email)
-        send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, recipients)
+
+        if send_html_mail and body_html:
+            send_html_mail(subject, body, body_html, settings.DEFAULT_FROM_EMAIL, recipients)
+        else:
+            send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, recipients)
     
     # reset environment to original language
     activate(current_language)
@@ -396,7 +419,7 @@ class ObservedItem(models.Model):
     
     notice_type = models.ForeignKey(NoticeType, verbose_name=_("notice type"))
     
-    added = models.DateTimeField(_("added"), default=datetime.datetime.now)
+    added = models.DateTimeField(_("added"), default=now)
     
     # the signal that will be listened to send the notice
     signal = models.TextField(verbose_name=_("signal"))
@@ -413,7 +436,6 @@ class ObservedItem(models.Model):
             extra_context = {}
         extra_context.update({"observed": self.observed_object})
         send([self.user], self.notice_type.label, extra_context)
-
 
 def observe(observed, observer, notice_type_label, signal="post_save"):
     """

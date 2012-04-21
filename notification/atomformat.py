@@ -28,8 +28,13 @@
 # THE SOFTWARE.
 # 
 
+try:
+    from django.utils.timezone import now
+except ImportError:
+    from datetime import datetime
+    now = datetime.now
+
 from xml.sax.saxutils import XMLGenerator
-from datetime import datetime
 
 
 GENERATOR_TEXT = 'django-atompub'
@@ -81,7 +86,7 @@ class Feed(object):
     VALIDATE = True
     
     
-    def __init__(self, slug, feed_url):
+    def __init__(self, slug=None, feed_url=None):
         # @@@ slug and feed_url are not used yet
         pass
     
@@ -232,7 +237,7 @@ class AtomFeed(object):
             updates.sort()
             return updates[-1]
         else:
-            return datetime.now() # @@@ really we should allow a feed to define its "start" for this case
+            return now() # @@@ really we should allow a feed to define its "start" for this case
     
     
     def write_text_construct(self, handler, element_name, data):
